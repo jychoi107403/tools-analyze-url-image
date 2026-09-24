@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>URL Image Compression Analyzer</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <header class="header fade-in">
+      <h1>Image Opti-Analyzer</h1>
+      <p>URL을 입력하여 숨겨진 이미지 용량 다이어트 가능성을 확인해보세요.</p>
+    </header>
+
+    <main>
+      <form id="analyze-form" class="url-form fade-in" style="animation-delay: 0.1s;">
+        <input
+          type="url"
+          id="url-input"
+          class="url-input"
+          placeholder="https://example.com"
+          required
+        />
+        <button type="submit" id="analyze-btn" class="analyze-btn">
+          분석 시작
+        </button>
+      </form>
+
+      <div id="error-message" class="error-message fade-in" style="display: none;"></div>
+
+      <div id="loader" class="loader-container fade-in" style="display: none;">
+        <div class="spinner"></div>
+        <p>이미지를 수집하고 WebP 압축 시뮬레이션을 진행하고 있습니다...</p>
+      </div>
+
+      <div id="results-container" class="results-container fade-in" style="display: none; animation-delay: 0.2s;">
+        <div class="results-summary glass">
+          <div class="summary-item">
+            <h3>총 이미지</h3>
+            <p id="total-images">0개</p>
+          </div>
+          <div class="summary-item">
+            <h3>현재 용량</h3>
+            <p id="total-original">0 B</p>
+          </div>
+          <div class="summary-item savings">
+            <h3>절약 가능</h3>
+            <p id="total-savings">0 B</p>
+          </div>
+          <div class="summary-item savings">
+            <h3>절감률</h3>
+            <p id="total-percent">0%</p>
+          </div>
+        </div>
+
+        <div id="image-grid" class="image-grid">
+          <!-- Cards will be injected here via JS -->
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>
