@@ -85,7 +85,19 @@ export async function POST(req: Request) {
       }
     });
 
-    const uniqueImages = Array.from(imageUrls);
+    // --- [추가된 로직] 쓸데없는 시스템 이미지(프로필, 배경, 아이콘 등) 걸러내기 ---
+    const isMeaningfulImage = (imgUrl: string) => {
+      const lower = imgUrl.toLowerCase();
+      // 네이버 블로그의 기본 스태틱(시스템) 이미지나 프로필 이미지 제외
+      if (lower.includes('ssl.pstatic.net/static/')) return false;
+      if (lower.includes('blog.naver.com/profile/')) return false;
+      // 일반적인 아이콘, 로고, 아바타 이미지 제외
+      if (lower.includes('icon') || lower.includes('logo') || lower.includes('avatar')) return false;
+      return true; // 위 조건에 안 걸리면 진짜 사진으로 판단
+    };
+
+    // 추출된 이미지 중 필터를 통과한 '진짜 의미 있는' 이미지만 남깁니다.
+    const uniqueImages = Array.from(imageUrls).filter(isMeaningfulImage);
 
     // 3. 각 이미지 원본 용량 파악 및 압축 예측 계산
     const results = [];
@@ -122,9 +134,9 @@ export async function POST(req: Request) {
                 originalSize = arrayBuffer.byteLength;
             }
 
-            // 용량이 0이거나 1KB보다 작은 이미지는 무시합니다 (아이콘 등).
+            // 용량이 0이거나 10KB(10240바이트)보다 작은 이미지는 사진이 아닌 아이콘/이모티콘으로 간주하고 무시합니다.
             if (originalSize === 0) return null;
-            if (originalSize < 1024) return null;
+            if (originalSize < 10240) return null;
 
             // 4. WebP 변환 시 예측 용량 계산
             // 기존 sharp 라이브러리 대신, 일반적으로 원본의 60% 수준으로 압축된다고 가정한 "예측치"를 계산합니다.
