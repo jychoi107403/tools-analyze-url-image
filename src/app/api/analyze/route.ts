@@ -55,9 +55,10 @@ export async function POST(req: Request) {
     // 2. 이미지 URL 추출하기 (중복 방지를 위해 Set 사용)
     const imageUrls = new Set<string>();
 
-    // <img> 태그에서 src 또는 data-src(지연 로딩) 속성을 찾습니다.
+    // <img> 태그에서 src 또는 지연 로딩 속성(data-lazy-src, data-original 등)을 찾습니다.
     $('img').each((i, el) => {
-      let src = $(el).attr('src') || $(el).attr('data-src');
+      // 네이버 등 많은 사이트가 지연 로딩을 위해 진짜 주소를 다른 속성에 숨겨둡니다.
+      let src = $(el).attr('data-lazy-src') || $(el).attr('data-original') || $(el).attr('data-src') || $(el).attr('src');
       if (src) {
         try {
           // 상대 경로를 절대 경로로 변환합니다.
@@ -91,6 +92,8 @@ export async function POST(req: Request) {
       // 네이버 블로그의 기본 스태틱(시스템) 이미지나 프로필 이미지 제외
       if (lower.includes('ssl.pstatic.net/static/')) return false;
       if (lower.includes('blog.naver.com/profile/')) return false;
+      // 네이버 블로그 마켓 스티커(이모티콘) 제외
+      if (lower.includes('storep-phinf.pstatic.net')) return false;
       // 일반적인 아이콘, 로고, 아바타 이미지 제외
       if (lower.includes('icon') || lower.includes('logo') || lower.includes('avatar')) return false;
       return true; // 위 조건에 안 걸리면 진짜 사진으로 판단
