@@ -1,24 +1,24 @@
 import { NextResponse } from 'next/server';
 import * as cheerio from 'cheerio';
-import sharp from 'sharp';
 
-// To ignore TLS errors if fetching images from a bad cert site, optional but helpful for a tool like this.
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+// Cloudflare Edge 환경에서 실행되도록 명시합니다. (필수)
+export const runtime = 'edge';
 
 export async function POST(req: Request) {
   try {
     const { url } = await req.json();
 
     if (!url) {
-      return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+      return NextResponse.json({ error: 'URL을 입력해주세요.' }, { status: 400 });
     }
 
+    // 입력받은 URL에 http 프로토콜이 없으면 자동으로 붙여줍니다.
     let targetUrl = url;
     if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
       targetUrl = 'https://' + targetUrl;
     }
 
-    // 1. Fetch the HTML content
+    // 1. 타겟 웹페이지 HTML 가져오기
     const response = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
@@ -26,29 +26,31 @@ export async function POST(req: Request) {
     });
 
     if (!response.ok) {
-      return NextResponse.json({ error: `Failed to fetch URL: ${response.statusText}` }, { status: response.status });
+      return NextResponse.json({ error: `URL 연결 실패: ${response.statusText}` }, { status: response.status });
     }
 
     const html = await response.text();
+    // cheerio를 사용해 HTML 문서를 파싱(해석)합니다.
     const $ = cheerio.load(html);
 
-    // 2. Extract image URLs
+    // 2. 이미지 URL 추출하기 (중복 방지를 위해 Set 사용)
     const imageUrls = new Set<string>();
 
+    // <img> 태그에서 src 또는 data-src(지연 로딩) 속성을 찾습니다.
     $('img').each((i, el) => {
       let src = $(el).attr('src') || $(el).attr('data-src');
       if (src) {
-        // Handle relative URLs
         try {
+          // 상대 경로를 절대 경로로 변환합니다.
           const absoluteUrl = new URL(src, targetUrl).href;
           imageUrls.add(absoluteUrl);
         } catch (e) {
-          // ignore invalid URLs
+          // 유효하지 않은 URL은 무시합니다.
         }
       }
     });
 
-    // Also look for background images in inline styles (basic check)
+    // 배경 이미지 스타일(background-image)에서도 URL을 추출합니다.
     $('[style*="background-image"]').each((i, el) => {
       const style = $(el).attr('style');
       if (style) {
@@ -58,7 +60,7 @@ export async function POST(req: Request) {
             const absoluteUrl = new URL(match[1], targetUrl).href;
             imageUrls.add(absoluteUrl);
           } catch (e) {
-            // ignore invalid
+            // 유효하지 않은 URL은 무시합니다.
           }
         }
       }
@@ -66,10 +68,10 @@ export async function POST(req: Request) {
 
     const uniqueImages = Array.from(imageUrls);
 
-    // 3. Process each image (fetch, measure, compress)
+    // 3. 각 이미지 원본 용량 파악 및 압축 예측 계산
     const results = [];
 
-    // Process in batches or concurrently (up to 10 at a time to avoid timeout/OOM)
+    // Cloudflare Edge 제한을 고려하여 10개씩 묶어서 병렬 처리합니다.
     const MAX_CONCURRENT = 10;
     for (let i = 0; i < uniqueImages.length; i += MAX_CONCURRENT) {
       const batch = uniqueImages.slice(i, i + MAX_CONCURRENT);
@@ -77,8 +79,9 @@ export async function POST(req: Request) {
       const batchResults = await Promise.all(
         batch.map(async (imgUrl) => {
           try {
-            // Fetch image data
+            // 이미지 전체를 다운로드하지 않고, 헤더(HEAD)만 요청해서 용량(Content-Length)을 빠르게 알아냅니다.
             const imgRes = await fetch(imgUrl, {
+              method: 'HEAD',
               headers: {
                 'User-Agent': 'Mozilla/5.0',
                 'Referer': targetUrl,
@@ -87,58 +90,48 @@ export async function POST(req: Request) {
             
             if (!imgRes.ok) return null;
 
-            const arrayBuffer = await imgRes.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
+            const contentLength = imgRes.headers.get('content-length');
+            let originalSize = 0;
             
-            const originalSize = buffer.byteLength;
-            if (originalSize === 0) return null;
-
-            // Optional: skip very small images (e.g., tracking pixels < 1KB)
-            if (originalSize < 1024) return null;
-
-            // 4. Compress with Sharp to WebP
-            let compressedBuffer;
-            try {
-              compressedBuffer = await sharp(buffer)
-                .webp({ quality: 75 })
-                .toBuffer();
-            } catch (err) {
-              // If sharp fails (e.g., unsupported format like svg), fallback to original size
-              return {
-                url: imgUrl,
-                originalSize,
-                compressedSize: originalSize,
-                savings: 0,
-                savingsPercent: 0,
-                format: 'unsupported'
-              };
+            if (contentLength) {
+                // Content-Length가 제공되는 경우 즉시 파악
+                originalSize = parseInt(contentLength, 10);
+            } else {
+                // HEAD 요청으로 용량을 모를 경우에만 GET으로 본문을 받아 용량을 측정합니다.
+                const getRes = await fetch(imgUrl);
+                const arrayBuffer = await getRes.arrayBuffer();
+                originalSize = arrayBuffer.byteLength;
             }
 
-            const compressedSize = compressedBuffer.byteLength;
+            // 용량이 0이거나 1KB보다 작은 이미지는 무시합니다 (아이콘 등).
+            if (originalSize === 0) return null;
+            if (originalSize < 1024) return null;
+
+            // 4. WebP 변환 시 예측 용량 계산
+            // 기존 sharp 라이브러리 대신, 일반적으로 원본의 60% 수준으로 압축된다고 가정한 "예측치"를 계산합니다.
+            const estimatedCompressedSize = Math.floor(originalSize * 0.6); 
             
-            // Only report savings if it actually saved space
-            const finalSize = Math.min(originalSize, compressedSize);
-            const savings = originalSize - finalSize;
-            const savingsPercent = originalSize > 0 ? (savings / originalSize) * 100 : 0;
+            const savings = originalSize - estimatedCompressedSize;
+            const savingsPercent = (savings / originalSize) * 100;
 
             return {
               url: imgUrl,
               originalSize,
-              compressedSize: finalSize,
+              compressedSize: estimatedCompressedSize,
               savings,
               savingsPercent: parseFloat(savingsPercent.toFixed(2)),
-              format: 'webp'
+              format: 'webp (예측치)'
             };
           } catch (error) {
-            return null; // Skip images that fail to fetch or process
+            return null; // 처리에 실패한 이미지는 건너뜁니다.
           }
         })
       );
 
-      // Filter out nulls and add to results
       results.push(...batchResults.filter(Boolean));
     }
 
+    // 최종 분석 결과를 반환합니다.
     return NextResponse.json({
       success: true,
       url: targetUrl,
@@ -148,6 +141,6 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     console.error('Analyze Error:', error);
-    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: error.message || '서버 내부 오류가 발생했습니다.' }, { status: 500 });
   }
 }
