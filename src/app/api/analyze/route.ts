@@ -18,6 +18,25 @@ export async function POST(req: Request) {
       targetUrl = 'https://' + targetUrl;
     }
 
+    // --- [추가된 로직] 네이버 블로그 우회 (iframe 껍데기 벗기기) ---
+    try {
+      const urlObj = new URL(targetUrl);
+      // 입력된 주소가 네이버 블로그일 경우에만 작동합니다.
+      if (urlObj.hostname === 'blog.naver.com') {
+        // 주소에서 '/'를 기준으로 쪼개서 아이디와 글번호를 찾아냅니다. (예: /time0708_/224417164786)
+        const pathParts = urlObj.pathname.split('/').filter(Boolean);
+        if (pathParts.length >= 2) {
+          const blogId = pathParts[0];
+          const logNo = pathParts[1];
+          // 실제 이미지와 글이 들어있는 네이버 내부 본문 주소로 강제 변경(우회)합니다.
+          targetUrl = `https://blog.naver.com/PostView.naver?blogId=${blogId}&logNo=${logNo}`;
+        }
+      }
+    } catch (e) {
+      // URL 형식이 이상해서 에러가 나면 안전하게 무시하고 원래 주소로 진행합니다.
+    }
+    // --------------------------------------------------------
+
     // 1. 타겟 웹페이지 HTML 가져오기
     const response = await fetch(targetUrl, {
       headers: {
