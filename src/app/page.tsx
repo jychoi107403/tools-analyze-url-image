@@ -130,8 +130,11 @@ export default function Home() {
                 {data.images.sort((a,b) => b.savings - a.savings).map((img, idx) => (
                   <div key={idx} className="image-card glass">
                     <div className="img-preview-container">
+                      {/* 외부 이미지(네이버 등)의 핫링킹 차단을 우회하기 위해 referrerPolicy 추가 */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img.url} alt="Analyzed" className="img-preview" loading="lazy" />
+                      <a href={img.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', width: '100%', height: '100%' }}>
+                        <img src={img.url} alt="Analyzed" className="img-preview" loading="lazy" referrerPolicy="no-referrer" />
+                      </a>
                     </div>
                     <div className="card-details">
                       <div className="url-text" title={img.url}>{img.url}</div>
